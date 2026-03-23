@@ -1,0 +1,11 @@
+build :: import "std/build";
+
+build.project({ name: "http_server_demo_yo", root: "./src/lib.yo" });
+
+exe :: build.executable({ name: "http_server_demo_yo", root: "./src/main.yo", optimize: build.Optimize.ReleaseFast });
+
+install :: build.step("install", "Build all artifacts");
+install.depend_on(exe);
+
+run_step :: build.step("run", "Run the application");
+run_step.depend_on(build.run(exe));
