@@ -1,6 +1,6 @@
 build :: import "std/build";
 
-build.project({ name: "http_server_demo_yo", root: "./src/lib.yo" });
+build.module({ name: "http_server_demo_yo", root: "./src/lib.yo" });
 
 exe :: build.executable({ name: "http_server_demo_yo", root: "./src/main.yo", optimize: build.Optimize.ReleaseFast });
 
