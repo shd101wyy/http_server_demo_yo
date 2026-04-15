@@ -10,4 +10,4 @@ a.out.c
 .DS_Store
 Thumbs.db
 
-.devenv
+.devenv*
