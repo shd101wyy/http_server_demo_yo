@@ -1,21 +1,23 @@
 // HTTP Server Demo — A simple HTTP/1.1 server in Yo
 //
 // Demonstrates:
-//   - Async/await with IO effect
+//   - Async/await with Io effect
 //   - Exception handling via algebraic effects
 //   - TCP networking (TcpListener, TcpStream)
 //   - String processing and HTTP parsing
 
-{ TcpListener, TcpStream } :: import "std/net/tcp";
-{ SocketAddr, IpAddr } :: import "std/net/addr";
-{ Error, AnyError, Exception } :: import "std/error";
-{ HttpMethod, HttpHeader, HttpRequest, HttpResponse, http_status_text } :: import "std/http/http";
-{ ArrayList } :: import "std/collections/array_list";
-open import "std/string";
-open import "std/fmt";
-{ GlobalAllocator } :: import "std/allocator";
+{ TcpListener, TcpStream } :: import("std/net/tcp");
+{ SocketAddr, IpAddr } :: import("std/net/addr");
+{ Error, AnyError, Exception, IoExn } :: import("std/error");
+{ HttpMethod, HttpHeader, HttpRequest, HttpResponse, StatusCode } :: import("std/http/http");
+{ ArrayList } :: import("std/collections/array_list");
+{ String } :: import("std/string");
+{ println } :: import("std/fmt");
+{ GlobalAllocator } :: import("std/allocator");
 { malloc, free } :: GlobalAllocator;
-{ snprintf } :: import "std/libc/stdio";
+{ snprintf } :: import("std/libc/stdio");
+
+pragma(Pragma.AllowUnsafe);
 
 // ============================================================================
 // Configuration
@@ -33,22 +35,22 @@ BUF_SIZE :: usize(4096);
 // Returns Result(HttpRequest, String).
 parse_request :: (fn(raw: String) -> Result(HttpRequest, String))({
   lines := raw.split(`\r\n`);
-  cond((lines.len() == usize(0)) => { return .Err(`Empty request`); }, true => ());
+  cond((lines.len() == usize(0)) => { return(.Err(`Empty request`)); }, true => ());
 
   // Parse request line: "GET /path HTTP/1.1"
   request_line := lines.get(usize(0)).unwrap();
-  cond(request_line.is_empty() => { return .Err(`Empty request line`); }, true => ());
+  cond(request_line.is_empty() => { return(.Err(`Empty request line`)); }, true => ());
 
   // Find first space — separates method from path
   sp1_opt := request_line.index_of(` `);
-  cond(sp1_opt.is_none() => { return .Err(`Invalid request line: no method`); }, true => ());
+  cond(sp1_opt.is_none() => { return(.Err(`Invalid request line: no method`)); }, true => ());
   sp1 := sp1_opt.unwrap();
   method_str := request_line.substring(usize(0), sp1);
 
   // Find second space — separates path from version
   rest := request_line.substring((sp1 + usize(1)), request_line.len());
   sp2_opt := rest.index_of(` `);
-  cond(sp2_opt.is_none() => { return .Err(`Invalid request line: no path`); }, true => ());
+  cond(sp2_opt.is_none() => { return(.Err(`Invalid request line: no path`)); }, true => ());
   sp2 := sp2_opt.unwrap();
   path := rest.substring(usize(0), sp2);
 
@@ -60,7 +62,7 @@ parse_request :: (fn(raw: String) -> Result(HttpRequest, String))({
     (method_str == `DELETE`) => HttpMethod.DELETE,
     (method_str == `HEAD`)   => HttpMethod.HEAD,
     (method_str == `PATCH`)  => HttpMethod.PATCH,
-    true => { return .Err(`Unknown HTTP method`); }
+    true => { return(.Err(`Unknown HTTP method`)); }
   );
 
   req := HttpRequest.new(method, path);
@@ -68,7 +70,7 @@ parse_request :: (fn(raw: String) -> Result(HttpRequest, String))({
   // Parse headers
   j := usize(1);
   body_start := lines.len();
-  while (j < lines.len()), (j = (j + usize(1))), {
+  while((j < lines.len()), (j = (j + usize(1))), {
     hline := lines.get(j).unwrap();
     cond(
       hline.is_empty() => {
@@ -88,16 +90,16 @@ parse_request :: (fn(raw: String) -> Result(HttpRequest, String))({
         );
       }
     );
-  };
+  });
 
   // Parse body (if present)
   cond(
     (body_start < lines.len()) => {
       body := lines.get(body_start).unwrap();
       m := (body_start + usize(1));
-      while (m < lines.len()), (m = (m + usize(1))), {
+      while((m < lines.len()), (m = (m + usize(1))), {
         body = `${body}\r\n${lines.get(m).unwrap()}`;
-      };
+      });
       req.set_body(body);
     },
     true => ()
@@ -112,17 +114,18 @@ parse_request :: (fn(raw: String) -> Result(HttpRequest, String))({
 
 // Serialize an HTTP response to a string ready to send over TCP.
 serialize_response :: (fn(status: i32, content_type: String, body: String) -> String)({
-  status_text := http_status_text(status);
+  status_code := StatusCode.from_u16(u16(status));
+  status_text := cond(status_code.is_some() => status_code.unwrap().reason(), true => `Unknown`);
   body_len := body.as_bytes().len();
 
   // Format Content-Length as string
   len_buf := Array(u8, usize(16)).fill(u8(0));
-  snprintf(*(char)(&(len_buf(usize(0)))), usize(16), "%d", i32(body_len));
+  unsafe(snprintf(*(char)(&(len_buf(usize(0)))), usize(16), "%d", i32(body_len)));
   len_str := String.from_cstr(&(len_buf(usize(0)))).unwrap();
 
   // Format status code as string
   code_buf := Array(u8, usize(8)).fill(u8(0));
-  snprintf(*(char)(&(code_buf(usize(0)))), usize(8), "%d", status);
+  unsafe(snprintf(*(char)(&(code_buf(usize(0)))), usize(8), "%d", status));
   code_str := String.from_cstr(&(code_buf(usize(0)))).unwrap();
 
   `HTTP/1.1 ${code_str} ${status_text}\r\nContent-Type: ${content_type}\r\nContent-Length: ${len_str}\r\nConnection: close\r\n\r\n${body}`
@@ -134,7 +137,7 @@ serialize_response :: (fn(status: i32, content_type: String, body: String) -> St
 
 handle_root :: (fn() -> String)(
   serialize_response(i32(200), `text/html; charset=utf-8`,
-    `<!DOCTYPE html><html><head><title>Yo HTTP Server</title><style>body{font-family:sans-serif;max-width:600px;margin:40px auto;padding:0 20px}h1{color:#2563eb}a{color:#2563eb}code{background:#f1f5f9;padding:2px 6px;border-radius:4px}ul{line-height:2}</style></head><body><h1>Hello from Yo!</h1><p>This HTTP server is written in the <a href="https://github.com/aspect-build/yo">Yo programming language</a>.</p><p>Try these routes:</p><ul><li><a href="/hello">/hello</a> — plain text greeting</li><li><a href="/json">/json</a> — JSON response</li><li><a href="/echo">/echo</a> — echo request info</li></ul><p>Features demonstrated:</p><ul><li><code>async/await</code> with the <code>IO</code> effect</li><li>Algebraic effects for error handling (<code>Exception</code>)</li><li>TCP networking via <code>std/net/tcp</code></li><li>HTTP parsing and response building</li></ul></body></html>`
+    `<!DOCTYPE html><html><head><title>Yo HTTP Server</title><style>body{font-family:sans-serif;max-width:600px;margin:40px auto;padding:0 20px}h1{color:#2563eb}a{color:#2563eb}code{background:#f1f5f9;padding:2px 6px;border-radius:4px}ul{line-height:2}</style></head><body><h1>Hello from Yo!</h1><p>This HTTP server is written in the <a href="https://github.com/aspect-build/yo">Yo programming language</a>.</p><p>Try these routes:</p><ul><li><a href="/hello">/hello</a> — plain text greeting</li><li><a href="/json">/json</a> — JSON response</li><li><a href="/echo">/echo</a> — echo request info</li></ul><p>Features demonstrated:</p><ul><li><code>async/await</code> with the <code>Io</code> effect</li><li>Algebraic effects for error handling(<code>Exception</code>)</li><li>TCP networking via <code>std/net/tcp</code></li><li>HTTP parsing and response building</li></ul></body></html>`
   )
 );
 
@@ -151,11 +154,12 @@ handle_echo :: (fn(req: HttpRequest) -> String)({
 
   // Add headers
   body = `${body}<tr><th colspan="2">Headers</th></tr>`;
+  headers := req.headers.entries();
   i := usize(0);
-  while (i < req.headers.len()), (i = (i + usize(1))), {
-    h := req.headers.get(i).unwrap();
+  while((i < headers.len()), (i = (i + usize(1))), {
+    h := headers.get(i).unwrap();
     body = `${body}<tr><td>${h.name}</td><td>${h.value}</td></tr>`;
-  };
+  });
 
   body = `${body}</table></body></html>`;
   serialize_response(i32(200), `text/html; charset=utf-8`, body)
@@ -181,72 +185,75 @@ route :: (fn(req: HttpRequest) -> String)(
 // ============================================================================
 
 // Read a request from the stream, parse it, route it, and send the response.
-handle_connection :: (fn(stream: TcpStream, using(io: IO, exn: Exception)) -> unit)({
-  // Read raw bytes
-  buf := *(u8)(malloc(BUF_SIZE).unwrap());
-  n := io.await(stream.read(buf, BUF_SIZE));
+handle_connection :: (fn(stream : TcpStream, io : Io, exn : Exception) -> Impl(Future(unit, IoExn)))(
+  io.async(e => {
+    // Read raw bytes
+    buf := *(u8)(malloc(BUF_SIZE).unwrap());
+    n := e.io.await(stream.read(buf, BUF_SIZE, e.io), e);
 
-  cond(
-    (n <= i32(0)) => {
-      free(.Some(*(void)(buf)));
-      io.await(stream.close());
-    },
-    true => {
-      // Build String from raw bytes
-      bytes := ArrayList(u8).new();
-      i := usize(0);
-      while (i < usize(n)), (i = (i + usize(1))), {
-        bytes.push((buf &+ i).*);
-      };
-      free(.Some(*(void)(buf)));
-      raw := String.from_bytes(bytes);
+    cond(
+      (n == usize(0)) => {
+        free(.Some(*(void)(buf)));
+        e.io.await(stream.close(e.io), e);
+      },
+      true => {
+        // Build String from raw bytes
+        bytes := ArrayList(u8).new();
+        i := usize(0);
+        while((i < n), (i = (i + usize(1))), {
+          bytes.push((buf.add(i)).*);
+        });
+        free(.Some(*(void)(buf)));
+        raw := String.from_bytes(bytes);
 
-      // Parse and route
-      result := parse_request(raw);
-      response := match(result,
-        .Ok(req) => {
-          // Log the request
-          println(`${req.method.to_string()} ${req.path}`);
-          route(req)
-        },
-        .Err(msg) => {
-          println(`Bad request: ${msg}`);
-          serialize_response(i32(400), `text/plain; charset=utf-8`, `400 Bad Request: ${msg}`)
-        }
-      );
+        // Parse and route
+        result := parse_request(raw);
+        response := match(result,
+          .Ok(req) => {
+            // Log the request
+            println(`${req.method.to_string()} ${req.path}`);
+            route(req)
+          },
+          .Err(msg) => {
+            println(`Bad request: ${msg}`);
+            serialize_response(i32(400), `text/plain; charset=utf-8`, `400 Bad Request: ${msg}`)
+          }
+        );
 
-      // Send response
-      io.await(stream.write_string(response));
-      io.await(stream.close());
-    }
-  );
-});
+        // Send response
+        e.io.await(stream.write_string(response, e.io), e);
+        e.io.await(stream.close(e.io), e);
+      }
+    );
+  })
+);
 
 // ============================================================================
 // Main — Start the Server
 // ============================================================================
 
-main :: (fn(using(io : IO)) -> unit)({
-  given(exn) := Exception(throw : ((err) -> {
+main :: (fn(io : Io) -> unit)({
+  exn := Exception(throw : ((err) -> {
     println(`Server error`);
-    escape ();
+    unwind(());
   }));
+  e := IoExn(io : io, exn : exn);
 
   addr := SocketAddr.any(PORT);
-  listener := io.await(TcpListener.bind(addr));
+  listener := io.await(TcpListener.bind(addr, io), e);
   port := PORT;
   println(`Listening on http://0.0.0.0:${port}`);
 
   // Accept loop
-  while runtime(true), {
-    stream := io.await(listener.accept());
+  while(runtime(true), {
+    stream := io.await(listener.accept(io), e);
     // Per-connection error handler: log and continue, don't crash the server
-    given(conn_exn) := Exception(throw : ((err) -> {
+    conn_exn := Exception(throw : ((err) -> {
       println(`Connection error`);
-      escape ();
+      unwind(());
     }));
-    handle_connection(stream, using(io, conn_exn));
-  };
+    io.await(handle_connection(stream, io, conn_exn), e);
+  });
 });
 
-export main;
+export(main);

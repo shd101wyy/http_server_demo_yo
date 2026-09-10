@@ -1,4 +1,4 @@
-build :: import "std/build";
+build :: import("std/build");
 
 build.module({ name: "http_server_demo_yo", root: "./src/lib.yo" });
 
