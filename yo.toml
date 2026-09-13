@@ -1,0 +1,11 @@
+[package]
+name = "http_server_demo_yo"
+version = "0.1.0"
+description = "A small HTTP server demo written in Yo"
+license = "MIT"
+
+# No [modules]: this package is an executable, so nothing imports it by name.
+# (build.yo used to call build.module with a root of ./src/lib.yo, a file that
+# does not exist — the module's root now lives here, and there is no module.)
+
+[dependencies]
