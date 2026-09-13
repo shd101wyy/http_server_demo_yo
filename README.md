@@ -39,6 +39,7 @@ curl -H "X-Custom: test" http://localhost:8080/echo
 
 ```
 http_server_demo_yo/
+├── yo.toml           # Package manifest — [package], [dependencies]
 ├── build.yo          # Build configuration
 ├── src/
 │   └── main.yo       # HTTP server implementation (~250 lines)

@@ -1,8 +1,6 @@
 build :: import("std/build");
 
-build.module({ name: "http_server_demo_yo", root: "./src/lib.yo" });
-
-exe :: build.executable({ name: "http_server_demo_yo", root: "./src/main.yo", optimize: build.Optimize.ReleaseFast });
+exe :: build.executable({ name : "http_server_demo_yo", root : "./src/main.yo", optimize : build.Optimize.ReleaseFast });
 
 install :: build.step("install", "Build all artifacts");
 install.depend_on(exe);
